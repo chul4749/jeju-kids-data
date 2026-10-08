@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: "17 * * * *"   # 매시 17분(정각은 GitHub가 붐벼 지연이 잦다)
   workflow_dispatch:
+    inputs:
+      kakao_budget:
+        description: "카카오(사진·후기·식당) 채우는 양 배수. 평소 3, 처음 채울 때 20 안팎"
+        default: "3"
 
 permissions:
   contents: read
@@ -18,7 +22,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 170
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -42,6 +46,7 @@ jobs:
           VISITJEJU_KEY: ${{ secrets.VISITJEJU_KEY }}
           KOPIS_KEY: ${{ secrets.KOPIS_KEY }}
           BUDGET: "1"
+          KAKAO_BUDGET: ${{ github.event.inputs.kakao_budget || '3' }}
         run: ./gradlew run -q --args="site/v1 cache"
       - uses: actions/cache/save@v4
         if: always()

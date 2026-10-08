@@ -37,6 +37,11 @@ fun main(args: Array<String>) {
     fun env(k: String) = System.getenv(k).orEmpty()
     /** 한 번 돌 때 새로 채울 양. 처음 며칠은 이 양만큼씩 늘어난다. */
     val budget = env("BUDGET").toIntOrNull() ?: 1
+    /**
+     * 카카오(블로그·이미지·장소 검색) 몫은 따로 크게: 하루 한도가 공공데이터 개발계정(약 1,000건)보다 훨씬 커서
+     * 사진·후기·식당을 빨리 채울 수 있다. 처음 채울 때는 수동 실행으로 크게(KAKAO_BUDGET=20 안팎) 한 번 돌린다.
+     */
+    val kakaoBudget = env("KAKAO_BUDGET").toIntOrNull() ?: 3
     val cache = ResponseCache(cacheDir)
     val repo = Repository(
         UrlHttp, cache, { env("DATA_GO_KR_KEY") },
@@ -58,7 +63,7 @@ fun main(args: Array<String>) {
     step("비짓제주 기간") { repo.fillVisitJeju(today, 60 * budget) }
     step("KOPIS 상세") { repo.fillKopis(today, 30 * budget) }
     var events = repo.festivals(today, force = false, waitAll = true)
-    step("행사 위치") { repo.fillGeo(events.data, 120 * budget) }
+    step("행사 위치") { repo.fillGeo(events.data, 120 * kakaoBudget) }
     events = events.copy(data = repo.withGeo(events.data))
 
     // 2) 장소 + 블로그 신호(찜 대신 아이 관련도 순) + 사진.
@@ -66,9 +71,9 @@ fun main(args: Array<String>) {
     val ordered = places.data.sortedWith(
         compareByDescending<Place> { PlaceTag.KIDSCAFE in it.tags }.thenByDescending { it.image == null }.thenByDescending { it.kidScore },
     )
-    step("장소 블로그 신호") { repo.fillSignals(ordered, 60 * budget) }
+    step("장소 블로그 신호") { repo.fillSignals(ordered, 60 * kakaoBudget) }
     val targets = repo.imageTargets(events.data, places.data)
-    step("검색 사진") { repo.fillImages(targets, 60 * budget) }
+    step("검색 사진") { repo.fillImages(targets, 60 * kakaoBudget) }
 
     // 3) 관광공사 장소 상세(소개·이용시간·사진): 7일 캐시, 한 번에 조금씩.
     var newDetails = 0
@@ -98,7 +103,7 @@ fun main(args: Array<String>) {
     for ((r, c) in cells.sortedBy { it.first * 10000 + it.second }) for (kind in FoodPicker.Kind.entries) {
         val slot = FoodPicker.Slot(today, kind, r / 50.0, c / 50.0)
         val cached = cache.read("food2_" + slot.searchKey) != null
-        if (!cached && newFood >= 20 * budget) continue
+        if (!cached && newFood >= 25 * kakaoBudget) continue
         val cands = runCatching { repo.food(slot) }.getOrNull() ?: continue
         if (!cached) newFood++
         val top = cands.take(15)
@@ -106,7 +111,7 @@ fun main(args: Array<String>) {
         // 블로그 확인은 순위에 쓰는 앞쪽 몇 곳만(앱의 FoodPicker.toCheck와 같은 기준).
         for (p in FoodPicker.toCheck(top, slot)) {
             val have = cache.read("blog2_" + p.id.filter { it.isLetterOrDigit() }) != null
-            if (!have && newFoodSignals >= 40 * budget) continue
+            if (!have && newFoodSignals >= 40 * kakaoBudget) continue
             runCatching { repo.signal(p) }.getOrNull()?.let { foodSignals[p.id] = it }
             if (!have) newFoodSignals++
         }
