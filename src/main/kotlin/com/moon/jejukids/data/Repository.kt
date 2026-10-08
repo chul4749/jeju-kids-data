@@ -25,9 +25,14 @@ class Repository(
     private val cacheOnlyMode: Boolean = false,
     /** 행사 출처 하나를 이만큼 기다려도 안 오면 저장된 자료로 대신한다. */
     private val slowSourceMs: Long = 8_000,
+    /**
+     * 중앙 수집 파일 주소(…/jeju-kids-data/v1/). 있으면 공공 API를 직접 부르지 않고 이 파일들만 받는다
+     * — 키가 앱에 없어도 되고, 사용자 수와 관계없이 API 호출은 중앙에서 한 번(GitHub Actions, 1시간마다).
+     */
+    private val remoteBase: String? = null,
 ) {
     /** 앱을 열자마자 보여줄 용도: 같은 캐시를 쓰되 네트워크는 쓰지 않는 저장소. */
-    fun cacheOnly(): Repository = Repository(http, cache, key, clock, kakaoKey, visitJejuKey, kopisKey, playJejuEnabled, cacheOnlyMode = true, slowSourceMs = slowSourceMs)
+    fun cacheOnly(): Repository = Repository(http, cache, key, clock, kakaoKey, visitJejuKey, kopisKey, playJejuEnabled, cacheOnlyMode = true, slowSourceMs = slowSourceMs, remoteBase = remoteBase)
 
     private val visitJeju = VisitJejuApi(http, visitJejuKey)
     private val kopis = KopisApi(http, kopisKey)
@@ -48,7 +53,38 @@ class Repository(
     private val weatherApi = WeatherApi(http, key)
     private val airApi = AirApi(http, key)
 
-    val hasKey: Boolean get() = key().isNotBlank()
+    /** 중앙 수집 파일을 쓰는지. */
+    val isRemote: Boolean get() = !remoteBase.isNullOrBlank()
+
+    /** 실제 정보를 보여줄 수 있는지(아니면 샘플). */
+    val hasKey: Boolean get() = isRemote || key().isNotBlank()
+
+    /** 사진·후기·식당 같은 덧붙임 정보를 보여줄 수 있는지(중앙 파일 또는 카카오 키). */
+    val canEnrich: Boolean get() = isRemote || hasKakaoKey
+
+    // ---- 중앙 수집 파일 ----
+
+    /** 큰 파일(후기·사진·상세)을 매번 다시 읽지 않도록, 같은 내용이면 읽어 둔 결과를 쓴다. */
+    private val memo = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, Any?>>()
+
+    private fun <T> remoteFile(name: String, ttlMs: Long, force: Boolean, parse: (String) -> T): Loaded<T> {
+        val l = cached("r_" + name.substringBefore('.'), ttlMs, force, { http.get(remoteBase!!.trimEnd('/') + "/" + name) }) { body ->
+            @Suppress("UNCHECKED_CAST")
+            val hit = memo[name]?.takeIf { it.first == body.hashCode().toLong() }?.second as T?
+            hit ?: parse(body).also { memo[name] = body.hashCode().toLong() to it }
+        }
+        return l
+    }
+
+    private fun remoteSignals(): Map<String, KidSignal> =
+        runCatching { remoteFile("signals.json", 6 * HOUR, false) { Wire.map(org.json.JSONObject(it), Wire::signal) }.data }.getOrDefault(emptyMap())
+
+    private fun remoteImages(): Map<String, FoundImage> =
+        runCatching { remoteFile("images.json", 6 * HOUR, false) { Wire.map(org.json.JSONObject(it), Wire::image) }.data }.getOrDefault(emptyMap())
+
+    /** 중앙 수집이 마지막으로 돈 시각(설정 화면 표시용). */
+    fun remoteUpdatedAt(): String? = if (!isRemote) null else
+        runCatching { remoteFile("meta.json", HOUR, false) { org.json.JSONObject(it).optString("updatedAt") }.data }.getOrNull()
 
     private fun <T> cached(
         cacheKey: String,
@@ -85,6 +121,8 @@ class Repository(
      * 한 곳이 실패해도 나머지로 보여준다. 같은 행사가 여러 곳에 올라오면 제목으로 묶는다.
      */
     fun festivals(today: LocalDate, force: Boolean = false, waitAll: Boolean = false): Loaded<List<Festival>> {
+        if (isRemote) return remoteFile("events.json", HOUR, force) { Wire.list(org.json.JSONArray(it), Wire::festival) }
+            .let { l -> l.copy(data = l.data.filter { !it.end.isBefore(today) }) }
         if (!hasKey) return Loaded(SampleData.festivals(today), null)
         val jobs = eventSources(today, force)
         // 출처끼리 기다리지 않게 동시에 받는다. 한 곳이 오래 걸리면(교육청 서버 등) 저장해 둔 자료로 먼저 채우고,
@@ -155,6 +193,7 @@ class Repository(
      * KOPIS는 짧은 시간에 요청이 몰리면 접속을 막는다(2026-10-08 실측: 수십 건 연속 → 400 Request Blocked) → 한 건마다 쉬어 간다.
      */
     fun fillKopis(today: LocalDate, limit: Int): Int {
+        if (isRemote) return 0 // 중앙에서 채운다
         if (!hasKopisKey || cacheOnlyMode) return 0
         val items = runCatching { kopisList(today, false).data }.getOrNull() ?: return 0
         var done = 0
@@ -199,6 +238,7 @@ class Repository(
      * 끝난 행사는 다시 읽지 않고, 진행·예정 행사는 7일마다, 기간을 못 찾은 페이지는 30일마다 다시 본다.
      */
     fun fillVisitJeju(today: LocalDate, limit: Int): Int {
+        if (isRemote) return 0
         if (!hasVisitJejuKey || cacheOnlyMode) return 0
         val list = runCatching { vjList(false).data }.getOrNull() ?: return 0
         var done = 0
@@ -222,6 +262,7 @@ class Repository(
     }
 
     fun places(force: Boolean = false): Loaded<List<Place>> {
+        if (isRemote) return remoteFile("places.json", 6 * HOUR, force) { Wire.list(org.json.JSONArray(it), Wire::place) }
         if (!hasKey) return Loaded(SampleData.places, null)
         val types = listOf(KidFilter.TYPE_SPOT, KidFilter.TYPE_CULTURE, KidFilter.TYPE_LEISURE)
         val results = types.map { type ->
@@ -244,6 +285,10 @@ class Repository(
      * 네트워크 없이 볼 때(cacheOnly)는 저장된 것만.
      */
     fun food(slot: com.moon.jejukids.logic.FoodPicker.Slot): List<Place> {
+        if (isRemote) return remoteFile("food.json", 6 * HOUR, false) { body ->
+            val o = org.json.JSONObject(body)
+            o.keys().asSequence().associateWith { k -> Wire.list(o.getJSONArray(k), Wire::place) }
+        }.data[slot.searchKey].orEmpty()
         if (!hasKey) return SampleData.food(slot)
         if (!hasKakaoKey) return emptyList()
         val fetch = {
@@ -261,7 +306,7 @@ class Repository(
     private fun geoKey(qs: List<GeoQuery>) = "geo2_" + Integer.toHexString(qs.joinToString("|") { it.kind + ":" + it.text }.hashCode())
 
     /** 캐시에 있는 좌표를 좌표 없는 행사에 붙인다(네트워크 없음). */
-    fun withGeo(list: List<Festival>): List<Festival> = list.map { f ->
+    fun withGeo(list: List<Festival>): List<Festival> = if (isRemote) list else list.map { f ->
         if (f.lat != null && f.lng != null) return@map f
         val q = GeoApi.queriesFor(f).takeIf { it.isNotEmpty() } ?: return@map f
         val c = cache.read(geoKey(q))?.let { runCatching { GeoApi.parse(it.body) }.getOrNull() } ?: return@map f
@@ -270,6 +315,7 @@ class Repository(
 
     /** 좌표 없는 행사의 위치를 최대 [limit]건 찾는다. 못 찾은 것도 저장해 90일 동안 다시 묻지 않는다. */
     fun fillGeo(list: List<Festival>, limit: Int): Int {
+        if (isRemote) return 0
         if (!hasKakaoKey || cacheOnlyMode) return 0
         var done = 0
         for (q in list.filter { it.lat == null && !it.sample }.map(GeoApi::queriesFor).filter { it.isNotEmpty() }.distinct()) {
@@ -283,6 +329,10 @@ class Repository(
     }
 
     fun weather(region: Region, now: LocalDateTime, force: Boolean = false): Loaded<Weather> {
+        if (isRemote) return remoteFile("weather.json", HOUR, force) { body ->
+            val o = org.json.JSONObject(body)
+            Region.entries.filter { o.has(it.name) }.associateWith { Wire.weather(o.getJSONObject(it.name)) }
+        }.let { l -> Loaded(l.data[region] ?: throw ApiException("날씨 정보 없음"), l.savedAt, l.error) }
         if (!hasKey) return Loaded(SampleData.weather(region), null)
         return cached("weather_${region.name}", HOUR, force, { weatherApi.raw(region, now) }) {
             WeatherApi.parse(it, region, now)
@@ -290,12 +340,19 @@ class Repository(
     }
 
     fun air(region: Region, force: Boolean = false): Loaded<Air?> {
+        if (isRemote) return remoteFile("air.json", 30 * MINUTE, force) { body ->
+            val o = org.json.JSONObject(body)
+            Region.entries.filter { o.has(it.name) }.associateWith { Wire.air(o.getJSONObject(it.name)) }
+        }.let { l -> Loaded(l.data[region], l.savedAt, l.error) }
         if (!hasKey) return Loaded(SampleData.air(region), null)
         return cached("air", 30 * MINUTE, force, { airApi.raw() }) { AirApi.parse(it, region) }
     }
 
     /** 상세(소개·이용정보·사진). 자주 바뀌지 않아 7일 캐시(중앙 수집 시 하루 한도 때문). */
     fun detail(id: String, typeId: Int): Detail? {
+        if (isRemote) return runCatching {
+            remoteFile("details.json", 24 * HOUR, false) { Wire.map(org.json.JSONObject(it), Wire::detail) }.data[id]
+        }.getOrNull()
         // 관광공사 항목(숫자 id)만 상세 API가 있다.
         if (!hasKey || typeId == KidFilter.TYPE_KAKAO || !id.all { it.isDigit() }) return null
         val common = cached("common_$id", 7 * 24 * HOUR, false, { tour.commonRaw(id) }) { portalItems(it); it }.data
@@ -321,7 +378,7 @@ class Repository(
     private fun imageKey(t: ImageTarget) = "img3_" + Integer.toHexString((t.queries.first() + "|" + t.titleKey).hashCode())
 
     /** 네트워크 없이 캐시에 있는 이미지만. */
-    fun cachedImages(items: List<ImageTarget>): Map<String, FoundImage> = items.mapNotNull { t ->
+    fun cachedImages(items: List<ImageTarget>): Map<String, FoundImage> = if (isRemote) remoteImages().let { m -> items.mapNotNull { t -> m[t.id]?.let { t.id to it } }.toMap() } else items.mapNotNull { t ->
         cache.read(imageKey(t))?.let { e -> runCatching { ImageSearchApi.parseAny(e.body) }.getOrNull()?.let { t.id to it } }
     }.toMap()
 
@@ -330,6 +387,7 @@ class Repository(
      * 검색어를 차례로 시도해 쓸 만한 사진이 나온 응답을 저장한다(끝까지 없으면 마지막 응답 → 아이콘 표시).
      */
     fun fillImages(items: List<ImageTarget>, limit: Int): Int {
+        if (isRemote) return 0
         if (!hasKakaoKey || cacheOnlyMode) return 0
         var done = 0
         for (t in items.distinctBy { imageKey(it) }) {
@@ -357,12 +415,13 @@ class Repository(
 
     /** 장소 하나의 신호. 30일 동안은 다시 묻지 않는다. */
     fun signal(place: Place, force: Boolean = false): KidSignal? {
+        if (isRemote) return remoteSignals()[place.id]
         if (!hasKakaoKey || place.sample) return null
         return cached(signalKey(place.id), SIGNAL_TTL, force, { blogs.signalRaw(place.title, wantImage = place.image == null) }, BlogSignalApi::parse).data
     }
 
     /** 네트워크 없이 캐시에 있는 신호만 읽는다(목록 배지용). */
-    fun cachedSignals(places: List<Place>): Map<String, KidSignal> = places.mapNotNull { p ->
+    fun cachedSignals(places: List<Place>): Map<String, KidSignal> = if (isRemote) remoteSignals().let { m -> places.mapNotNull { p -> m[p.id]?.let { p.id to it } }.toMap() } else places.mapNotNull { p ->
         cache.read(signalKey(p.id))?.let { e -> runCatching { BlogSignalApi.parse(e.body) }.getOrNull()?.let { p.id to it } }
     }.toMap()
 
@@ -371,6 +430,7 @@ class Repository(
      * 카카오 하루 한도를 여러 사용자가 나눠 쓰므로 조금씩 나눠 채운다.
      */
     fun fillSignals(places: List<Place>, limit: Int): Int {
+        if (isRemote) return 0
         if (!hasKakaoKey || cacheOnlyMode) return 0
         var done = 0
         for (p in places) {
