@@ -1,0 +1,7 @@
+.gradle/
+build/
+cache/
+site/
+local.properties
+.idea/
+run.log
