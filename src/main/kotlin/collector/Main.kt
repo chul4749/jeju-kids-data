@@ -111,7 +111,7 @@ fun main(args: Array<String>) {
         // 블로그 확인은 순위에 쓰는 앞쪽 몇 곳만(앱의 FoodPicker.toCheck와 같은 기준).
         for (p in FoodPicker.toCheck(top, slot)) {
             val have = cache.read("blog2_" + p.id.filter { it.isLetterOrDigit() }) != null
-            if (!have && newFoodSignals >= 40 * kakaoBudget) continue
+            if (!have && newFoodSignals >= 100 * kakaoBudget) continue
             runCatching { repo.signal(p) }.getOrNull()?.let { foodSignals[p.id] = it }
             if (!have) newFoodSignals++
         }
