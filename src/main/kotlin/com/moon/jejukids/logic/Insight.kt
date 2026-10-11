@@ -139,7 +139,12 @@ object Insight {
      * 또는 아이와 다녀온 블로그 글이 많은 곳. 일반 명소(오름·해안도로·사찰 등)는 "전부"에서만 보인다.
      */
     fun kidFriendly(p: Place, signal: KidSignal?): Boolean =
-        PlaceTag.KIDSCAFE in p.tags || p.kidScore >= 3 || (signal?.kidPostCount ?: 0) >= 500
+        PlaceTag.KIDSCAFE in p.tags || p.kidScore >= 3 || (signal?.kidPostCount ?: 0) >= 500 ||
+            // 최근 "아이랑" 글 50건 중 15건 이상이 제목에 이곳 이름을 단 후기면 아이랑 많이 가는 곳이다(환상숲 33, 카페캄포 36).
+            (signal?.ownPosts ?: 0) >= 15 && signal?.warn != true
+
+    /** 식당·카페(점심·카페 칸용)인지 — 코스의 오전·오후나 홈 추천 3곳에는 넣지 않는다. */
+    fun isFoodOrCafe(p: Place): Boolean = PlaceTag.FOOD in p.tags || PlaceTag.CAFE in p.tags
 
     // ---- 연령 추정 ----
 

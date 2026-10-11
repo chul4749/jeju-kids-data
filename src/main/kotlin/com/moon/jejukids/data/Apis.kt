@@ -169,8 +169,10 @@ class TourApi(private val http: Http, private val key: () -> String) {
                 val addr = o.str("addr1").orEmpty()
                 if (addr.isNotEmpty() && !addr.contains("제주")) return@mapNotNull null
                 val code = o.str("lclsSystm3").orEmpty()
+                // 이름에 아이 관련 말이 없어도 버리지 않는다 — "산양큰엉곶"(아이랑 후기 50/50)이 이름 때문에 빠졌었다(2026-10-12).
+                // 아이 추천 여부는 블로그 후기(Insight.kidFriendly)가 정한다. 술·카지노 같은 곳만 뺀다.
+                if (KidFilter.isExcluded(title)) return@mapNotNull null
                 val score = KidFilter.kidScore(title, typeId, code)
-                if (score == 0) return@mapNotNull null
                 Place(
                     id = o.str("contentid") ?: return@mapNotNull null,
                     typeId = typeId,

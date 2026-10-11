@@ -96,7 +96,8 @@ object Planner {
         val used = mutableSetOf<String>()
         // 고정한 곳은 다른 칸에 또 나오지 않게 먼저 "사용함"으로.
         locked.values.forEach { used += itemId(it) }
-        val usable = places.filter { signals[it.id]?.warn != true }.filter { ageOk(Insight.agesFor(it, signals[it.id]), ages) }
+        // 이름만으로 넣은 곳(관련도 0)까지 코스에 넣지 않도록 아이 추천 장소만. 식당·카페는 점심·카페 칸이 따로 고른다.
+        val usable = places.filter { signals[it.id]?.warn != true && Insight.kidFriendly(it, signals[it.id]) && !Insight.isFoodOrCafe(it) }.filter { ageOk(Insight.agesFor(it, signals[it.id]), ages) }
         return days.map { day ->
             val w = weather.firstOrNull { it.date == day }
             val mode = mode(w)

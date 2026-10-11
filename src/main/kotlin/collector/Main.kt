@@ -118,6 +118,12 @@ fun main(args: Array<String>) {
     }
     println("식당·카페 칸: ${food.length()} / ${cells.size * 2} (새로 $newFood), 후기 확인 새로 $newFoodSignals")
 
+    // 4-1) 아이랑 많이 가는 식당·카페(예: 카페캄포 — 아이랑 후기 36/50)는 장소 목록·지도에도 넣는다.
+    val allFood = food.keys().asSequence().flatMap { k -> Wire.list(food.getJSONArray(k), Wire::place).asSequence() }.distinctBy { it.id }.toList()
+    val foodSigAll = repo.cachedSignals(allFood)
+    val kidFood = allFood.filter { p -> Insight.kidFriendly(p, foodSigAll[p.id]) }
+    println("아이랑 식당·카페: ${kidFood.size} / ${allFood.size}")
+
     // 5) 날씨·미세먼지(두 지역).
     val weather = JSONObject()
     val air = JSONObject()
@@ -129,11 +135,11 @@ fun main(args: Array<String>) {
 
     // 6) 파일 쓰기. 신호는 화면에 쓰는 만큼만(근거 글 3개, 인용 2개) 줄여서.
     fun slim(s: KidSignal) = s.copy(noKidsPosts = s.noKidsPosts.take(3), quotes = s.quotes.take(2))
-    val signals = (repo.cachedSignals(places.data) + foodSignals).mapValues { slim(it.value) }
+    val signals = (repo.cachedSignals(places.data) + foodSigAll + foodSignals).mapValues { slim(it.value) }
     val images: Map<String, FoundImage> = repo.cachedImages(targets)
     fun write(name: String, body: String) = File(out, name).writeText(body, Charsets.UTF_8)
     write("events.json", Wire.list(events.data, Wire::festival).toString())
-    write("places.json", Wire.list(places.data, Wire::place).toString())
+    write("places.json", Wire.list(places.data + kidFood.filter { f -> places.data.none { it.id == f.id } }, Wire::place).toString())
     write("signals.json", Wire.map(signals, Wire::signal).toString())
     write("images.json", Wire.map(images, Wire::image).toString())
     write("details.json", details.toString())
