@@ -138,10 +138,27 @@ object Insight {
      * 아이 추천(지도·장소 목록 기본값): 키즈카페, 아이 관련 단어가 뚜렷한 곳(관련도 3 이상),
      * 또는 아이와 다녀온 블로그 글이 많은 곳. 일반 명소(오름·해안도로·사찰 등)는 "전부"에서만 보인다.
      */
-    fun kidFriendly(p: Place, signal: KidSignal?): Boolean =
-        PlaceTag.KIDSCAFE in p.tags || p.kidScore >= 3 || (signal?.kidPostCount ?: 0) >= 500 ||
-            // 최근 "아이랑" 글 50건 중 15건 이상이 제목에 이곳 이름을 단 후기면 아이랑 많이 가는 곳이다(환상숲 33, 카페캄포 36).
+    fun kidFriendly(p: Place, signal: KidSignal?): Boolean {
+        if (isFoodOrCafe(p)) return kidFriendlyFood(signal)
+        return PlaceTag.KIDSCAFE in p.tags || p.kidScore >= 3 || (signal?.kidPostCount ?: 0) >= 500 ||
+            // 최근 "아이랑" 글 50건 중 15건 이상이 제목에 이곳 이름을 단 후기면 아이랑 많이 가는 곳이다(산양큰엉곶 50, 환상숲 16).
             (signal?.ownPosts ?: 0) >= 15 && signal?.warn != true
+    }
+
+    /** 아이 편의를 말할 때 나오는 말(식당·카페 판단용). */
+    private val kidAmenities = setOf("놀이방", "유아의자", "아기의자", "좌식", "수유실", "기저귀 갈이대", "유모차 OK", "넓어요", "모래놀이", "먹이주기")
+
+    /**
+     * 식당·카페는 인기 있는 곳이면 "아이랑" 글이 쉽게 쌓여서(블루보틀 50/50) 후기 수만으로는 안 된다.
+     * 아이랑 후기 30건 이상(최근 50건 중) + 아이 편의 말 2종류 이상·합 8번 이상일 때만 장소 목록에 넣는다.
+     * 2026-10-12 실데이터: 카페 617곳 중 31곳(카페캄포 36건·편의 17번, 이끼숲소길, 드르쿰다 등), 식당 839곳 중 44곳.
+     */
+    fun kidFriendlyFood(signal: KidSignal?): Boolean {
+        val s = signal ?: return false
+        if (s.warn || s.ownPosts < 30) return false
+        val kw = s.keywords.filter { it.first in kidAmenities }
+        return kw.size >= 2 && kw.sumOf { it.second } >= 8
+    }
 
     /** 식당·카페(점심·카페 칸용)인지 — 코스의 오전·오후나 홈 추천 3곳에는 넣지 않는다. */
     fun isFoodOrCafe(p: Place): Boolean = PlaceTag.FOOD in p.tags || PlaceTag.CAFE in p.tags
