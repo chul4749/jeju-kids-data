@@ -348,6 +348,15 @@ class Repository(
         return cached("air", 30 * MINUTE, force, { airApi.raw() }) { AirApi.parse(it, region) }
     }
 
+    /** 홈 추천용 상세 전체(쉬는 날·연령). 중앙 수집 파일 하나, 하루 한 번 받는다. 직접 모드는 캐시에 있는 것만. */
+    fun allDetails(ids: List<Pair<String, Int>> = emptyList()): Map<String, Detail> {
+        if (isRemote) return runCatching {
+            remoteFile("details.json", 24 * HOUR, false) { Wire.map(org.json.JSONObject(it), Wire::detail) }.data
+        }.getOrDefault(emptyMap())
+        return ids.filter { (id, _) -> id.all { it.isDigit() } && cache.read("common_$id") != null }
+            .mapNotNull { (id, type) -> runCatching { detail(id, type) }.getOrNull()?.let { id to it } }.toMap()
+    }
+
     /** 상세(소개·이용정보·사진). 자주 바뀌지 않아 7일 캐시(중앙 수집 시 하루 한도 때문). */
     fun detail(id: String, typeId: Int): Detail? {
         if (isRemote) return runCatching {

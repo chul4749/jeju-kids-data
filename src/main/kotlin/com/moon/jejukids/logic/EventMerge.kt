@@ -57,14 +57,34 @@ object EventMerge {
     /** 제목 속 괄호·따옴표 안 이름들. "우당도서관 … <다함께 만드는 연극>" → ["다함께 만드는 연극"]. */
     fun quotedNames(title: String): List<String> = quoted.findAll(title).map { eventKey(it.groupValues[1]) }.filter { it.length >= 2 }.toList()
 
-    private val institution = Regex("[가-힣A-Za-z0-9]{1,12}(도서관|박물관|미술관|학습관|문화원|문화센터|예술의전당|기념관)")
+    // 숫자는 빼야 "2026 제주현대미술관"이 "2026제주현대미술관"으로 읽혀 다른 기관이 되지 않는다(2026-10-16).
+    private val institution = Regex("[가-힣A-Za-z]{1,12}(도서관|박물관|미술관|학습관|문화원|문화센터|예술의전당|기념관)")
 
     /** 제목에 나온 기관 이름들(띄어쓰기 없이). */
     fun institutions(title: String): Set<String> = institution.findAll(title.replace(" ", "")).map { it.value }.toSet()
 
+    /** 괄호·따옴표 속을 뺀 제목 키. "저지문화예술인마을 예술제 <ART&JEOJI 2026>" → "저지문화예술인마을예술제". */
+    fun bareKey(title: String): String = eventKey(title.replace(quoted, " "))
+
+    /**
+     * 기간이 똑같고 같은 곳(500m 안)이며 괄호 밖 이름이 같으면, 괄호 속 부제가 영어·한글로 달라도 같은 행사다.
+     * 예(2026-10-16): "저지문화예술인마을 예술제 <ART&JEOJI 2026>"(제주인놀다) ↔ "… [아트&저지]"(비짓제주).
+     */
+    fun sameSpotAndDates(a: Festival, b: Festival): Boolean {
+        if (a.start != b.start || a.end != b.end) return false
+        if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return false
+        if (Recommender.distanceKm(a.lat, a.lng, b.lat, b.lng) > 0.5) return false
+        val ba = bareKey(a.title)
+        val bb = bareKey(b.title)
+        if (ba.length < 5 || bb.length < 5) return false
+        val (short, long) = if (ba.length <= bb.length) ba to bb else bb to ba
+        return ba == bb || long.contains(short) || similarity(ba, bb) >= 0.8
+    }
+
     fun same(a: Festival, b: Festival): Boolean {
         // 교육청 예약은 회차·신청 단위라(10/17, 10/24 …, "영화제 어린이 심사위원 모집") 제목이 완전히 같을 때만 묶는다.
         if (a.source == "교육청 예약" || b.source == "교육청 예약") return eventKey(a.title) == eventKey(b.title) && a.start == b.start
+        if (sameSpotAndDates(a, b)) return true
         if (!closeInTime(a, b) || !sameTitle(a.title, b.title)) return false
         // 같은 이름이라도 장소가 10km 넘게 떨어져 있으면 다른 공연이다
         // ("호두까기인형" 서귀포예술의전당 12/12 ↔ "호두까기 인형" 설문대여성문화센터 12/13, 2026-10-08).
