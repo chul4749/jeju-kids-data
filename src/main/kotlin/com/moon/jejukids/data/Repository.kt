@@ -144,7 +144,8 @@ class Repository(
         val ok = sources.mapNotNull { it.second.getOrNull() }
         if (ok.isEmpty()) throw sources.first().second.exceptionOrNull()!!
         return Loaded(
-            data = withGeo(com.moon.jejukids.logic.EventQuality.normalize(mergeEvents(ok.flatMap { it.data }))),
+            // 합치기 전에 위치를 붙인다: "같은 기간·같은 곳" 중복 규칙에 좌표가 필요하다(비짓제주 행사는 주소 검색으로만 위치가 생김).
+            data = withGeo(com.moon.jejukids.logic.EventQuality.normalize(mergeEvents(withGeo(ok.flatMap { it.data })))),
             savedAt = ok.mapNotNull { it.savedAt }.minOrNull(),
             error = if (cacheOnlyMode) null else sources.firstNotNullOfOrNull { (name, r) ->
                 (r.getOrNull()?.error ?: r.exceptionOrNull()?.message)?.let { "$name: $it" }
