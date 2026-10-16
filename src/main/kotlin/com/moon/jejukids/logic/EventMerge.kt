@@ -71,11 +71,15 @@ object EventMerge {
      * 예(2026-10-16): "저지문화예술인마을 예술제 <ART&JEOJI 2026>"(제주인놀다) ↔ "… [아트&저지]"(비짓제주).
      */
     fun sameSpotAndDates(a: Festival, b: Festival): Boolean {
-        if (a.start != b.start || a.end != b.end) return false
         if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return false
         if (Recommender.distanceKm(a.lat, a.lng, b.lat, b.lng) > 0.5) return false
         val ba = bareKey(a.title)
         val bb = bareKey(b.title)
+        // 시즌 공연과 그중 한 회차: 괄호 밖 이름이 완전히 같고(기관 이름만은 아님) 한쪽 기간이 다른 쪽 안에 있으면 같은 행사.
+        // 예(2026-10-16): "[2026 상설공연] 제주칠머리당영등굿전수관 상설공연" 4/24~10/30 ↔ "… 상설공연 '…씨드림+영감놀이'" 10/30.
+        val inside = (!a.start.isBefore(b.start) && !a.end.isAfter(b.end)) || (!b.start.isBefore(a.start) && !b.end.isAfter(a.end))
+        if (inside && ba == bb && ba.length >= 10 && institutions(a.title.replace(quoted, " ")).none { it == ba }) return true
+        if (a.start != b.start || a.end != b.end) return false
         if (ba.length < 5 || bb.length < 5) return false
         val (short, long) = if (ba.length <= bb.length) ba to bb else bb to ba
         return ba == bb || long.contains(short) || similarity(ba, bb) >= 0.8
