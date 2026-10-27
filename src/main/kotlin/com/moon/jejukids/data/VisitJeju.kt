@@ -84,12 +84,18 @@ class VisitJejuApi(private val http: Http, private val key: () -> String) {
         fun candidates(all: List<VjEvent>, today: LocalDate): List<VjEvent> = all
             .filter { e -> years.findAll(e.title).map { it.value.toInt() }.toList().let { ys -> ys.isEmpty() || ys.max() >= today.year } }
             // 제목에 연도가 없는 행사 중 오래전 등록분(번호가 작은 것)은 이미 끝난 행사였다(2026-10 실측: 진행 중인 것은 14174번 이후).
-            .filter { e -> years.containsMatchIn(e.title) || cidNumber(e.cid) >= OLD_CID_LIMIT }
+            // 단, 해마다 열리는 축제는 옛 번호를 그대로 쓰고 날짜만 고친다("제15회 산지천축제" CNTS_000000000022285,
+            // 탐라문화제·해녀축제·칠십리축제 등 98건, 2026-10-27) → 축제 이름이면 옛 번호도 확인한다(뒤 순서로).
+            .filter { e -> years.containsMatchIn(e.title) || cidNumber(e.cid) >= OLD_CID_LIMIT || annual.containsMatchIn(e.title) }
             .sortedWith(
-                // 제목에 올해·내년이 적힌 행사 먼저, 그다음 최근 등록 순.
+                // 제목에 올해·내년이 적힌 행사 먼저, 그다음 최근 등록, 옛 번호 축제는 마지막.
                 compareByDescending<VjEvent> { e -> years.findAll(e.title).any { it.value.toInt() >= today.year } }
+                    .thenByDescending { cidNumber(it.cid) >= OLD_CID_LIMIT || years.containsMatchIn(it.title) }
                     .thenByDescending { cidNumber(it.cid) },
             )
+
+        /** 해마다 열리는 축제 이름. */
+        private val annual = Regex("축제|페스티벌|문화제|축전|제 *[0-9]+ *회")
 
         private fun cidNumber(cid: String) = cid.filter(Char::isDigit).toLongOrNull() ?: 0L
         private const val OLD_CID_LIMIT = 300000000014000L

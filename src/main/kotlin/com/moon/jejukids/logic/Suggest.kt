@@ -179,7 +179,8 @@ object Suggest {
         val g0 = Recommender.group(r.first())
         r.drop(1).firstOrNull { Recommender.group(it) != g0 && it.tags.firstOrNull() != r.first().tags.firstOrNull() }
             ?.let { picked += it to "다른 종류" }
-        val rest = r.filter { p -> picked.none { it.first.id == p.id } }
+        // 이미 고른 곳과 같은 묶음(감귤농장 둘 등)은 3곳 안에 함께 넣지 않는다(2026-10-16 감귤밭 두 곳이 같이 나왔다).
+        val rest = r.filter { p -> picked.none { it.first.id == p.id || Recommender.group(it.first) == Recommender.group(p) } }
         // 가까운 곳: 8km 안에서 순위가 가장 높은 곳(늘 제일 가까운 한 곳만 나오지 않게). 없으면 가장 가까운 곳.
         val withKm = if (i.here != null) rest.take(15).filter { km(i, it) != null } else emptyList()
         val nearest = withKm.firstOrNull { km(i, it)!! <= 8.0 } ?: withKm.minByOrNull { km(i, it)!! }
@@ -191,7 +192,8 @@ object Suggest {
             if (picked.any { Recommender.group(it.first) == Recommender.group(p) } && rest.size > 3) continue
             picked += p to "함께 추천"
         }
-        for (p in rest) { if (picked.size >= 3) break; if (picked.none { it.first.id == p.id }) picked += p to "함께 추천" }
+        // 후보가 적어 종류를 다 나눌 수 없으면 남은 곳으로 채운다.
+        for (p in r) { if (picked.size >= 3) break; if (picked.none { it.first.id == p.id }) picked += p to "함께 추천" }
         return picked.take(3).map { (p, role) -> Suggestion(p, role, reasons(i, p), km(i, p)) }
     }
 

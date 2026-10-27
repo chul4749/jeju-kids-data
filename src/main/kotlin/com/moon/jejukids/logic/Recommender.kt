@@ -51,7 +51,7 @@ object Recommender {
     }
 
     /**
-     * 추천 장소 고르기. 점수 = 아이 관련도 + 가까움 + 아이랑 후기 수 + 날짜(와 [shuffle])로 섞는 값.
+     * 추천 장소 고르기. 점수 = 아이랑 후기 수 + 가까움 + 이름 관련도(작게) + 날짜(와 [shuffle])로 섞는 값.
      * 2026-10-07 사용자 지적("거의 고정"): 가까움이 최대 3점이라 늘 집 근처 같은 곳이 뽑혔다 →
      * 25km 안은 완만하게 최대 2점으로 낮추고, 섞는 값을 키우고, 비슷한 곳(감귤농장 두 곳 등)은 함께 뽑지 않는다.
      */
@@ -76,7 +76,11 @@ object Recommender {
                 } else if (p.region == region) 1.0 else 0.0
                 val posts = signals[p.id]?.kidPostCount ?: 0
                 val popular = kotlin.math.log10(1.0 + posts).coerceAtMost(4.0) * 0.4
-                minOf(p.kidScore, 8) * 0.4 + near + popular + rotation * 6
+                // 이름 단어 점수(kidScore)는 크게 쓰지 않는다: "감귤체험농장"은 체험·농장·감귤·귤이 겹쳐 9점이라
+                // 해변·오름(0~2점)보다 늘 앞서 주말 코스 장소 칸의 25%가 감귤농장이었다(후보 중 3%, 2026-10-16).
+                // 대신 이곳 이름이 제목에 있는 아이랑 후기 수(최근 50건 중)를 쓴다.
+                val own = (signals[p.id]?.ownPosts ?: 0) / 50.0 * 1.5
+                minOf(p.kidScore, 3) * 0.2 + own + near + popular + rotation * 6
             }
         // 비슷한 곳은 한 번만(같은 분류·같은 종류 이름). 모자라면 나머지로 채운다.
         val chosen = mutableListOf<Place>()

@@ -249,7 +249,8 @@ class Repository(
             if (old != null) {
                 val d = runCatching { VisitJejuApi.datesFromJson(old.body) }.getOrNull()
                 val age = clock() - old.savedAt
-                if (d != null && (d.end < today || age < 7 * 24 * HOUR)) continue
+                // 끝난 행사도 2주마다 다시 본다: 해마다 같은 페이지에 다음 해 날짜를 고쳐 올린다(산지천축제 등).
+                if (d != null && age < (if (d.end < today) 14 else 7) * 24 * HOUR) continue
                 if (d == null && age < SIGNAL_TTL) continue
             }
             val page = runCatching { visitJeju.pageRaw(e.cid) }.getOrNull() ?: break // 연결 문제면 다음에.
