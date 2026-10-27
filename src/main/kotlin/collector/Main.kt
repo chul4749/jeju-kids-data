@@ -63,6 +63,13 @@ fun main(args: Array<String>) {
     step("비짓제주 기간") { repo.fillVisitJeju(today, 60 * budget) }
     step("KOPIS 상세") { repo.fillKopis(today, 30 * budget) }
     var events = repo.festivals(today, force = false, waitAll = true)
+    // 1-1) 공식 출처에 아직 없는 행사를 직접 넣은 목록(extras.json, 근거 기사 링크 포함). 끝난 것은 뺀다.
+    // 나중에 공식 출처에 올라오면 같은 행사로 합쳐지고 공식 쪽이 대표가 된다(EventMerge 출처 순서상 맨 뒤).
+    val extras = File("extras.json").takeIf { it.exists() }?.let { f ->
+        runCatching { Wire.list(JSONArray(f.readText(Charsets.UTF_8)), Wire::festival) }.onFailure { println("extras.json 읽기 실패: ${it.message}") }.getOrNull()
+    }.orEmpty().filter { !it.end.isBefore(today) }
+    if (extras.isNotEmpty()) events = events.copy(data = com.moon.jejukids.logic.EventMerge.merge(events.data + extras))
+    println("직접 추가 행사: ${extras.size}")
     step("행사 위치") { repo.fillGeo(events.data, 120 * kakaoBudget) }
     events = events.copy(data = repo.withGeo(events.data))
 
